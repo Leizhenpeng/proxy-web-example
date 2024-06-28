@@ -1,23 +1,38 @@
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middleware');
+const cheerio = require('cheerio');
 
 const app = express();
+const targetUrl = 'https://www.metaso.cn';
 
 // 配置反向代理中间件
 app.use('/', createProxyMiddleware({
-    target: 'https://www.baidu.com',
+    target: targetUrl,
     changeOrigin: true,
-    onProxyReq: (proxyReq, req, res) => {
-        // 修改请求头，确保目标服务器正确处理请求
-        proxyReq.setHeader('Host', 'www.baidu.com');
+    selfHandleResponse: true,
+    on: {
+        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, content-type, Authorization');
+
+            const contentType = proxyRes.headers['content-type'];
+            if (contentType && contentType.includes('text/html')) {
+                const $ = cheerio.load(responseBuffer.toString('utf8'));
+                $('body').css('opacity', '0.9'); // 修改透明度为10%
+                return $.html();
+            }
+            return responseBuffer;
+        }),
+        proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+            proxyReqOpts.headers['Referer'] = targetUrl;
+            proxyReqOpts.headers['Origin'] = targetUrl;
+            proxyReqOpts.headers['Host'] = new URL(targetUrl).host;
+            // 可以根据需要修改 User-Agent
+            proxyReqOpts.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36';
+            return proxyReqOpts;
+        },
     },
-    onProxyRes: (proxyRes, req, res) => {
-        // 允许跨域请求
-        res.setHeader('Access-Control-Allow-Origin', '*');
-    },
-    onError: (err, req, res) => {
-        res.status(500).send('Something went wrong.');
-    }
 }));
 
 // 启动服务器
